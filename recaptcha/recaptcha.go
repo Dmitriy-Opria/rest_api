@@ -12,9 +12,8 @@ import (
 
 const (
 	postURL         = "https://www.google.com/recaptcha/api/siteverify"
-	recaptchaSecret = "need to paste recaptchaSecret" //todo 
+	recaptchaSecret = "need to paste recaptchaSecret" //todo
 )
-
 
 type (
 	Request struct {

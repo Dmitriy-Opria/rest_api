@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/gomodule/redigo/redis"
 	"github.com/gorilla/mux"
 	"log"
 	"net/http"
@@ -19,9 +18,9 @@ import (
 )
 
 type App struct {
-	Router *mux.Router
-	DB     *sql.DB
-	Cache  redis.Conn
+	Router  *mux.Router
+	Manager *session.Manager
+	DB      *sql.DB
 }
 
 type Req struct {
@@ -29,11 +28,6 @@ type Req struct {
 	Password string `json:"password"`
 	Response string `json:"g-recaptcha-Response"`
 }
-
-var (
-	a       App
-	Manager *session.Manager
-)
 
 const (
 	cookieName  = "SID"
@@ -43,14 +37,17 @@ const (
 func (a *App) InitManager() {
 	var err error
 
-	Manager, err = session.NewManager("memory", cookieName, sessionsTTL)
+	manager, err := session.NewManager("memory", cookieName, sessionsTTL)
 	if err != nil {
 		os.Exit(1)
 	}
+	a.Manager = manager
 }
 
-func (a *App) InitializeDb(user, password, dbname string) {
-	connectionString := fmt.Sprintf("%s:%s@/%s", user, password, dbname)
+func (a *App) InitializeDb(host, user, password, dbname string) {
+	connectionString := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&multiStatements=true",
+		user, password,
+		host, dbname)
 	var err error
 	a.DB, err = sql.Open("mysql", connectionString)
 	if err != nil {
@@ -72,7 +69,7 @@ func main() {
 	conf := config.Get()
 
 	a.InitManager()
-	a.InitializeDb(conf.MySqlUser, conf.MySqlPassword, conf.MySqlDB)
+	a.InitializeDb(conf.MySqlHost, conf.MySqlUser, conf.MySqlPassword, conf.MySqlDB)
 	a.InitializeRoute()
 	a.Run(conf.Bind)
 }
@@ -95,7 +92,7 @@ func (a *App) getUsers(w http.ResponseWriter, r *http.Request) {
 		start = 0
 	}
 
-	sess := Manager.SessionGet(w, r, a.DB)
+	sess := a.Manager.SessionGet(w, r, a.DB)
 	if perm := sess.GetPerm(); perm == session.PermAdmin || perm == session.PermUser {
 
 		var user model.User
@@ -128,7 +125,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 				Password: req.Password,
 			}
 			if err := user.GetUser(a.DB); err == nil {
-				Manager.SessionStart(w, r, a.DB, &user)
+				a.Manager.SessionStart(w, r, a.DB, &user)
 				return
 
 			} else {
@@ -149,7 +146,7 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := Manager.SessionGet(w, r, a.DB)
+	sess := a.Manager.SessionGet(w, r, a.DB)
 	if perm := sess.GetPerm(); perm == session.PermAdmin || perm == session.PermUser {
 		if err := user.CreateUser(a.DB); err != nil {
 			respondWithError(w, http.StatusInternalServerError, err.Error())
@@ -170,7 +167,7 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := Manager.SessionGet(w, r, a.DB)
+	sess := a.Manager.SessionGet(w, r, a.DB)
 	if perm := sess.GetPerm(); perm == session.PermAdmin {
 		user := model.User{Id: uint32(id)}
 		if err := user.DeleteUser(a.DB); err != nil {

@@ -60,8 +60,6 @@ func (p *MemoryProvider) GC(lifeTime time.Duration) {
 	fmt.Println(tm)
 }
 
-// ==
-
 func (p *MemoryProvider) SessionInit(keyStr string) Session {
 
 	p.lock.Lock()
